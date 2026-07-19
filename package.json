@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "better-sqlite3": "^12.11.1",
     "express": "^5.2.1",
     "node-pty": "^1.1.0",
     "react": "^19.2.7",

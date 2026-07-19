@@ -3,36 +3,77 @@ const { cpus, totalmem, loadavg, uptime } = require('os');
 const { execSync, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const Database = require('better-sqlite3');
 
 const app = express();
 const PORT = 5174;
-const INVENTORY_DB = path.join(__dirname, 'inventory.json');
+const DB_PATH = path.join(__dirname, 'inventory.db');
 
-// Initialize inventory DB if not exists
-function initInventoryDB() {
-  if (!fs.existsSync(INVENTORY_DB)) {
-    const initialData = {
-      items: [
-        { id: '1', name: 'Nasi Putih', category: 'Food quantity: 2, unit: ' cup', min_stock: 5, notes: '', last_updated: new Date().toISOString() },
-        { id: '2', name: 'Sabun Cuci Piring', category: 'Soap', quantity: 3, unit: ' pcs', min_stock: 1, notes: '', last_updated: new Date().toISOString() },
-        { id: '3', name: 'Shampoo Sunsilk', category: 'Shampoo', quantity: 2, unit: ' bottles', min_stock: 1, notes: '', last_updated: new Date().toISOString() },
-        { id: '4', name: 'Pepsodent', category: 'Toothpaste', quantity: 2, unit: ' tubes', min_stock: 1, notes: '', last_updated: new Date().toISOString() },
-      ],
-      categories: ['Food', 'Soap', 'Shampoo', 'Toothpaste', 'Drinks', 'Snacks', 'Other'],
-    };
-    fs.writeFileSync(INVENTORY_DB, JSON.stringify(initialData, null, 2));
-    console.log(`Inventory DB initialized at ${INVENTORY_DB}`);
-  }
-}
-initInventoryDB();
+// Initialize SQLite database
+const db = new Database(DB_PATH);
+console.log(`SQLite database initialized at ${DB_PATH}`);
 
-function readInventory() {
-  return JSON.parse(fs.readFileSync(INVENTORY_DB, 'utf8'));
+// Create tables
+db.exec(`
+  CREATE TABLE IF NOT EXISTS items (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'Other',
+    quantity INTEGER NOT NULL DEFAULT 0,
+    unit TEXT NOT NULL DEFAULT 'pcs',
+    min_stock INTEGER NOT NULL DEFAULT 0,
+    notes TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS stock_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL,
+    old_quantity INTEGER,
+    new_quantity INTEGER NOT NULL,
+    delta INTEGER NOT NULL,
+    reason TEXT DEFAULT 'manual',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_items_category ON items(category);
+  CREATE INDEX IF NOT EXISTS idx_stock_history_item_id ON stock_history(item_id);
+`);
+
+// Insert default categories if empty
+const categoryCount = db.prepare('SELECT COUNT(*) as count FROM categories').get();
+if (categoryCount.count === 0) {
+  const insertCategory = db.prepare('INSERT OR IGNORE INTO categories (name) VALUES (?)');
+  ['Food', 'Soap', 'Shampoo', 'Toothpaste', 'Drinks', 'Snacks', 'Other'].forEach(cat => {
+    insertCategory.run(cat);
+  });
+  console.log('Default categories inserted');
 }
 
-function writeInventory(data) {
-  fs.writeFileSync(INVENTORY_DB, JSON.stringify(data, null, 2));
+// Insert default items if empty
+const itemCount = db.prepare('SELECT COUNT(*) as count FROM items').get();
+if (itemCount.count === 0) {
+  const insertItem = db.prepare('INSERT INTO items (id, name, category, quantity, unit, min_stock) VALUES (?, ?, ?, ?, ?, ?)');
+  const defaults = [
+    ['1', 'Nasi Putih', 'Food', 2, 'cup', 5],
+    ['2', 'Sabun Cuci Piring', 'Soap', 3, 'pcs', 1],
+    ['3', 'Shampoo Sunsilk', 'Shampoo', 2, 'bottles', 1],
+    ['4', 'Pepsodent', 'Toothpaste', 2, 'tubes', 1],
+  ];
+  defaults.forEach(item => insertItem.run(...item));
+  console.log('Default items inserted');
 }
+
+// Enable WAL mode for better performance
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -106,36 +147,64 @@ app.get('/api/stats', (req, res) => {
   }
 });
 
-// ── INVENTORY API ──────────────────────────────────────────────────────────
+// ── INVENTORY API (SQLite) ────────────────────────────────────────────────
 
 // Get all categories
 app.get('/api/inventory/categories', (req, res) => {
   try {
-    const data = readInventory();
-    res.json({ categories: data.categories || [] });
+    const rows = db.prepare('SELECT name FROM categories ORDER BY name').all();
+    res.json({ categories: rows.map(r => r.name) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get all items (with optional category filter)
+// Get all items with optional filter
 app.get('/api/inventory/items', (req, res) => {
   try {
-    const data = readInventory();
-    let items = data.items || [];
+    let sql = 'SELECT * FROM items';
+    const params = [];
+    const conditions = [];
 
-    // Filter by category
     if (req.query.category && req.query.category !== 'all') {
-      items = items.filter(item => item.category === req.query.category);
+      conditions.push('category = ?');
+      params.push(req.query.category);
     }
 
-    // Search by name
     if (req.query.search) {
-      const search = req.query.search.toLowerCase();
-      items = items.filter(item => item.name.toLowerCase().includes(search));
+      conditions.push('name LIKE ?');
+      params.push(`%${req.query.search}%`);
     }
 
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    sql += ' ORDER BY category, name';
+
+    const items = db.prepare(sql).all(...params);
     res.json({ items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get single item
+app.get('/api/inventory/items/:id', (req, res) => {
+  try {
+    const item = db.prepare('SELECT * FROM items WHERE id = ?').get(req.params.id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    res.json({ item });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get item history
+app.get('/api/inventory/items/:id/history', (req, res) => {
+  try {
+    const history = db.prepare('SELECT * FROM stock_history WHERE item_id = ? ORDER BY created_at DESC LIMIT 50').all(req.params.id);
+    res.json({ history });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -148,24 +217,26 @@ app.post('/api/inventory/items', (req, res) => {
   req.on('end', () => {
     try {
       const newItem = JSON.parse(body);
-      const data = readInventory();
-
-      // Generate ID
       const id = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      const item = {
+
+      db.prepare(`
+        INSERT INTO items (id, name, category, quantity, unit, min_stock, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
         id,
-        name: newItem.name || 'Unnamed',
-        category: newItem.category || 'Other',
-        quantity: Number(newItem.quantity) || 0,
-        unit: newItem.unit || 'pcs',
-        min_stock: Number(newItem.min_stock) || 0,
-        notes: newItem.notes || '',
-        last_updated: new Date().toISOString(),
-      };
+        newItem.name || 'Unnamed',
+        newItem.category || 'Other',
+        Number(newItem.quantity) || 0,
+        newItem.unit || 'pcs',
+        Number(newItem.min_stock) || 0,
+        newItem.notes || ''
+      );
 
-      data.items.push(item);
-      writeInventory(data);
+      // Record initial stock in history
+      db.prepare(`INSERT INTO stock_history (item_id, old_quantity, new_quantity, delta, reason) VALUES (?, ?, ?, ?, ?)`)
+        .run(id, 0, Number(newItem.quantity) || 0, Number(newItem.quantity) || 0, 'initial');
 
+      const item = db.prepare('SELECT * FROM items WHERE id = ?').get(id);
       res.json({ success: true, item });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -175,25 +246,31 @@ app.post('/api/inventory/items', (req, res) => {
 
 // Update item quantity (quick +/-)
 app.patch('/api/inventory/items/:id/quantity', (req, res) => {
-  let body = '';
+  let body = '' || '';
   req.on('data', chunk => body += chunk);
   req.on('end', () => {
     try {
-      const { delta, quantity } = JSON.parse(body);
-      const data = readInventory();
+      const { delta, quantity, reason } = JSON.parse(body);
+      const item = db.prepare('SELECT * FROM items WHERE id = ?').get(req.params.id);
+      if (!item) return res.status(404).json({ error: 'Item not found' });
 
-      const idx = data.items.findIndex(i => i.id === req.params.id);
-      if (idx === -1) return res.status(404).json({ error: 'Item not found' });
-
+      let newQuantity;
       if (delta !== undefined) {
-        data.items[idx].quantity = (data.items[idx].quantity || 0) + delta;
+        newQuantity = Math.max(0, item.quantity + delta);
       } else if (quantity !== undefined) {
-        data.items[idx].quantity = Number(quantity);
+        newQuantity = Math.max(0, Number(quantity));
+      } else {
+        return res.status(400).json({ error: 'delta or quantity required' });
       }
-      data.items[idx].last_updated = new Date().toISOString();
-      writeInventory(data);
 
-      res.json({ success: true, item: data.items[idx] });
+      const actualDelta = newQuantity - item.quantity;
+
+      db.prepare('UPDATE items SET quantity = ?, updated_at = datetime(\'now\') WHERE id = ?').run(newQuantity, req.params.id);
+      db.prepare(`INSERT INTO stock_history (item_id, old_quantity, new_quantity, delta, reason) VALUES (?, ?, ?, ?, ?)`)
+        .run(req.params.id, item.quantity, newQuantity, actualDelta, reason || 'manual');
+
+      const updatedItem = db.prepare('SELECT * FROM items WHERE id = ?').get(req.params.id);
+      res.json({ success: true, item: updatedItem });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -207,15 +284,33 @@ app.put('/api/inventory/items/:id', (req, res) => {
   req.on('end', () => {
     try {
       const updates = JSON.parse(body);
-      const data = readInventory();
+      const item = db.prepare('SELECT * FROM items WHERE id = ?').get(req.params.id);
+      if (!item) return res.status(404).json({ error: 'Item not found' });
 
-      const idx = data.items.findIndex(i => i.id === req.params.id);
-      if (idx === -1) return res.status(404).json({ error: 'Item not found' });
+      const fields = [];
+      const values = [];
 
-      data.items[idx] = { ...data.items[idx], ...updates, last_updated: new Date().toISOString() };
-      writeInventory(data);
+      if (updates.name !== undefined) { fields.push('name = ?'); values.push(updates.name); }
+      if (updates.category !== undefined) { fields.push('category = ?'); values.push(updates.category); }
+      if (updates.quantity !== undefined) { fields.push('quantity = ?'); values.push(Number(updates.quantity)); }
+      if (updates.unit !== undefined) { fields.push('unit = ?'); values.push(updates.unit); }
+      if (updates.min_stock !== undefined) { fields.push('min_stock = ?'); values.push(Number(updates.min_stock)); }
+      if (updates.notes !== undefined) { fields.push('notes = ?'); values.push(updates.notes); }
 
-      res.json({ success: true, item: data.items[idx] });
+      fields.push('updated_at = datetime(\'now\')');
+      values.push(req.params.id);
+
+      db.prepare(`UPDATE items SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+
+      // Record quantity change if quantity was updated
+      if (updates.quantity !== undefined && updates.quantity !== item.quantity) {
+        const delta = updates.quantity - item.quantity;
+        db.prepare(`INSERT INTO stock_history (item_id, old_quantity, new_quantity, delta, reason) VALUES (?, ?, ?, ?, ?)`)
+          .run(req.params.id, item.quantity, updates.quantity, delta, 'edit');
+      }
+
+      const updatedItem = db.prepare('SELECT * FROM items WHERE id = ?').get(req.params.id);
+      res.json({ success: true, item: updatedItem });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -225,9 +320,12 @@ app.put('/api/inventory/items/:id', (req, res) => {
 // Delete item
 app.delete('/api/inventory/items/:id', (req, res) => {
   try {
-    const data = readInventory();
-    data.items = data.items.filter(i => i.id !== req.params.id);
-    writeInventory(data);
+    const item = db.prepare('SELECT * FROM items WHERE id = ?').get(req.params.id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+
+    db.prepare('DELETE FROM items WHERE id = ?').run(req.params.id);
+    db.prepare('DELETE FROM stock_history WHERE item_id = ?').run(req.params.id);
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -241,18 +339,28 @@ app.post('/api/inventory/categories', (req, res) => {
   req.on('end', () => {
     try {
       const { name } = JSON.parse(body);
-      const data = readInventory();
-
-      if (!data.categories.includes(name)) {
-        data.categories.push(name);
-        writeInventory(data);
-      }
-
-      res.json({ success: true, categories: data.categories });
+      db.prepare('INSERT OR IGNORE INTO categories (name) VALUES (?)').run(name);
+      const rows = db.prepare('SELECT name FROM categories ORDER BY name').all();
+      res.json({ success: true, categories: rows.map(r => r.name) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
+});
+
+// Get stock summary/stats
+app.get('/api/inventory/summary', (req, res) => {
+  try {
+    const totalItems = db.prepare('SELECT COUNT(*) as count FROM items').get().count;
+    const totalStock = db.prepare('SELECT COALESCE(SUM(quantity), 0) as total FROM items').get().total;
+    const lowStock = db.prepare('SELECT COUNT(*) as count FROM items WHERE quantity <= min_stock').get().count;
+    const categories = db.prepare('SELECT COUNT(DISTINCT category) as count FROM items').get().count;
+    const recentChanges = db.prepare('SELECT COUNT(*) as count FROM stock_history WHERE created_at >= datetime(\'now\', \'-7 days\')').get().count;
+
+    res.json({ totalItems, totalStock, lowStock, categories, recentChanges });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Chat endpoint
