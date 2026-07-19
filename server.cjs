@@ -77,7 +77,7 @@ app.get('/api/stats', (req, res) => {
   }
 });
 
-// Chat endpoint - use hermes -z (oneshot mode)
+// Chat endpoint - use hermes -z (oneshot mode) with usage stats
 app.post('/api/chat', (req, res) => {
   let body = '';
   req.on('data', chunk => body += chunk);
@@ -94,15 +94,31 @@ app.post('/api/chat', (req, res) => {
       res.setHeader('Connection', 'keep-alive');
 
       const hermesPath = '/Users/horus/.hermes/hermes-agent/venv/bin/hermes';
+      const usageFile = `/tmp/hermes_usage_${Date.now()}.json`;
       const safePrompt = prompt.replace(/'/g, "'\\''");
-      const cmd = `"${hermesPath}" -z '${safePrompt}' 2>&1`;
+      const cmd = `"${hermesPath}" -z '${safePrompt}' --usage-file ${usageFile} 2>&1`;
+      const startTime = Date.now();
       
       console.log('[CHAT CMD]', cmd);
       
       exec(cmd, { cwd: '/Users/horus', timeout: 120000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+        const elapsed = Date.now() - startTime;
         console.log('[CHAT RESULT]', { error: error?.message, stdout: stdout?.trim()?.slice(0, 200) });
         const output = (stdout || '').trim() || (stderr || '').trim() || 'No response';
-        res.write(`data: ${JSON.stringify({ chunk: output })}\n\n`);
+        
+        // Read usage stats
+        let usage = null;
+        try {
+          const fs = require('fs');
+          if (fs.existsSync(usageFile)) {
+            usage = JSON.parse(fs.readFileSync(usageFile, 'utf8'));
+            fs.unlinkSync(usageFile); // clean up
+          }
+        } catch (e) {
+          console.error('[CHAT USAGE ERROR]', e.message);
+        }
+        
+        res.write(`data: ${JSON.stringify({ chunk: output, usage, elapsed: Math.round(elapsed / 1000) })}\n\n`);
         res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
         res.end();
       });

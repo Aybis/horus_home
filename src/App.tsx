@@ -185,6 +185,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
+  const [chatStats, setChatStats] = useState<{ elapsed: number; usage: any } | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -313,6 +314,17 @@ export default function App() {
                       : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-sm'
                   }`}>
                     <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                    {msg.role === 'assistant' && chatStats && i === chatMessages.length - 1 && (
+                      <div className="mt-2 pt-2 border-t border-slate-700/50 flex items-center gap-3 text-xs text-slate-500">
+                        <span>⏱ {chatStats.elapsed}s</span>
+                        <span>🧠 {chatStats.usage?.model || '—'}</span>
+                        <span>📊 {chatStats.usage?.total_tokens?.toLocaleString() || '—'} tokens</span>
+                        <span>🟢 {chatStats.usage?.input_tokens?.toLocaleString() || '—'} in</span>
+                        <span>🟣 {chatStats.usage?.output_tokens?.toLocaleString() || '—'} out</span>
+                        <span>⚡ {chatStats.usage?.reasoning_tokens?.toLocaleString() || '—'} reasoning</span>
+                        <span>💰 {chatStats.usage?.api_calls || '—'} calls</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -366,6 +378,9 @@ export default function App() {
                               updated[updated.length - 1] = { role: 'assistant', content: assistantMsg }
                               return updated
                             })
+                            if (data.elapsed && data.usage) {
+                              setChatStats({ elapsed: data.elapsed, usage: data.usage })
+                            }
                           }
                         } catch {}
                       }
