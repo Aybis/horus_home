@@ -176,6 +176,7 @@ export default function App() {
   const [inventoryFilter, setInventoryFilter] = useState<string>('all')
   const [inventorySearch, setInventorySearch] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false)
   const [editingItem, setEditingItem] = useState<any>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
@@ -321,7 +322,10 @@ export default function App() {
           <div>
             <div className="flex items-center justify-between mb-6">
               <div><h1 className="text-2xl font-bold text-white">🛒 Inventory</h1><p className="text-sm text-slate-400">Manage your household stock</p></div>
-              <button onClick={() => setShowAddModal(true)} className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-xl font-medium text-sm">+ Add Item</button>
+              <div className="flex gap-2">
+                <button onClick={() => setShowAddCategoryModal(true)} className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-xl text-sm">+ Category</button>
+                <button onClick={() => setShowAddModal(true)} className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-xl font-medium text-sm">+ Add Item</button>
+              </div>
             </div>
             <div className="flex flex-wrap gap-4 mb-6">
               <input type="text" placeholder="🔍 Search items..." value={inventorySearch} onChange={e => setInventorySearch(e.target.value)} className="flex-1 bg-slate-900 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500" />
@@ -348,9 +352,9 @@ export default function App() {
                         <button onClick={async () => { if (confirm(`Delete ${item.name}?`)) { await fetch(`http://100.111.117.127:5174/api/inventory/items/${item.id}`, { method: 'DELETE' }); setInventoryItems(prev => prev.filter(i => i.id !== item.id)) } }} className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-red-600/20 text-slate-400 hover:text-red-400 flex items-center justify-center">🗑️</button>
                       </div>
                     </div>
-                    <div className="mt-2 pt-2 border-t border-slate-700/50 flex justify-between"><span className="text-xs text-slate-600">Min: {item.min_stock} {item.unit}</span><span className="text-xs text-slate-600">{new Date(item.last_updated).toLocaleDateString()}</span></div>
+                    <div className="mt-2 pt-2 border-t border-slate-700/50 flex justify-between"><span className="text-xs text-slate-600">Min: {item.min_stock} {item.unit}</span><span className="text-xs text-slate-600">{new Date(item.updated_at).toLocaleDateString()}</span></div>
                   </div>
-                )
+                );
               })}
             </div>
             {inventoryItems.length === 0 && (
@@ -453,7 +457,7 @@ export default function App() {
             }}>
               <div className="space-y-3">
                 <input name="name" placeholder="Item name" defaultValue={editingItem?.name || ''} required className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
-                <select name="category" defaultValue={editingItem?.category || 'Other'} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500"><option value="all">All Categories</option>{inventoryCategories.map(cat => (<option key={cat} value={cat}>{cat}</option>))}</select>
+                <select name="category" defaultValue={editingItem?.category || 'Other'} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500"><option value="">--- Select ---</option>{inventoryCategories.map(cat => (<option key={cat} value={cat}>{cat}</option>))}</select>
                 <div className="flex gap-2">
                   <input name="quantity" type="number" placeholder="Quantity" defaultValue={editingItem?.quantity || 0} required className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
                   <input name="unit" placeholder="Unit (pcs, kg, etc)" defaultValue={editingItem?.unit || 'pcs'} className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
@@ -464,6 +468,39 @@ export default function App() {
               <div className="flex gap-2 mt-4">
                 <button type="button" onClick={() => { setShowAddModal(false); setEditingItem(null) }} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg">Cancel</button>
                 <button type="submit" className="flex-1 bg-violet-600 hover:bg-violet-700 text-white py-2 rounded-lg font-medium">{editingItem ? 'Save' : 'Add'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Category Modal */}
+      {showAddCategoryModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowAddCategoryModal(false) }}>
+          <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-sm border border-slate-700" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-white mb-4">Add Category</h2>
+            <p className="text-sm text-slate-400 mb-4">Cannot find your category? Add new.</p>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              const form = e.target as any
+              const categoryName = form.name.value.trim()
+              if (!categoryName) return
+
+              await fetch('http://100.111.117.127:5174/api/inventory/categories', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: categoryName })
+              })
+
+              // Refresh categories
+              const res = await fetch('http://100.111.117.127:5174/api/inventory/categories')
+              const d = await res.json()
+              setInventoryCategories(d.categories || [])
+
+              setShowAddCategoryModal(false)
+            }}>
+              <input name="name" placeholder="Category name (e.g. Frozen Food)" autoFocus required className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500 mb-2" />
+              <div className="flex gap-2 mt-4">
+                <button type="button" onClick={() => setShowAddCategoryModal(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg">Cancel</button>
+                <button type="submit" className="flex-1 bg-violet-600 hover:bg-violet-700 text-white py-2 rounded-lg font-medium">Add</button>
               </div>
             </form>
           </div>
