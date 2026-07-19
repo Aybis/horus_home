@@ -14,28 +14,16 @@ interface SystemStats {
 }
 
 interface Capability {
-  id: string
-  name: string
-  category: string
-  status: 'online' | 'pending' | 'offline'
-  description: string
-  connections: string[]
-  usage: number
+  id: string; name: string; category: string; status: 'online' | 'pending' | 'offline'
+  description: string; connections: string[]; usage: number
 }
 
 interface Activity {
-  id: string
-  time: string
-  action: string
-  status: 'success' | 'warning' | 'error'
-  app: string
+  id: string; time: string; action: string; status: 'success' | 'warning' | 'error'; app: string
 }
 
 interface Stat {
-  label: string
-  value: number
-  suffix?: string
-  trend?: number
+  label: string; value: number; suffix?: string; trend?: number
 }
 
 // ── Mock Data ──────────────────────────────────────────────────────────────
@@ -154,20 +142,17 @@ const StatCard = ({ label, value, suffix, trend }: Stat & { trend?: number }) =>
   </div>
 )
 
-// ── Nav Item Type ───────────────────────────────────────────────────────────
-
-type TabId = 'dashboard' | 'chat' | 'system' | 'capabilities' | 'activity' | 'connections'
+type TabId = 'dashboard' | 'chat' | 'system' | 'inventory' | 'capabilities' | 'activity' | 'connections'
 
 interface NavItem {
-  id: TabId
-  icon: string
-  label: string
+  id: TabId; icon: string; label: string
 }
 
 const navItems: NavItem[] = [
   { id: 'dashboard', icon: '📊', label: 'Dashboard' },
   { id: 'chat', icon: '💬', label: 'Chat' },
   { id: 'system', icon: '🖥️', label: 'System' },
+  { id: 'inventory', icon: '🛒', label: 'Inventory' },
   { id: 'capabilities', icon: '⚡', label: 'Capabilities' },
   { id: 'activity', icon: '📜', label: 'Activity Log' },
   { id: 'connections', icon: '🔗', label: 'Connections' },
@@ -178,7 +163,7 @@ const navItems: NavItem[] = [
 export default function App() {
   const [filter, setFilter] = useState<string>('all')
   const [search, setSearch] = useState('')
-  const [timeRange, setTimeRange] = useState('24h')
+  const [, setTimeRange] = useState('24h')
   const [activeTab, setActiveTab] = useState<TabId>('dashboard')
   const [stats, setStats] = useState<SystemStats | null>(null)
   const [history, setHistory] = useState<{ time: string; cpu: number; mem: number }[]>([])
@@ -186,11 +171,15 @@ export default function App() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [chatStats, setChatStats] = useState<{ elapsed: number; usage: any } | null>(null)
+  const [inventoryItems, setInventoryItems] = useState<any[]>([])
+  const [inventoryCategories, setInventoryCategories] = useState<string[]>([])
+  const [inventoryFilter, setInventoryFilter] = useState<string>('all')
+  const [inventorySearch, setInventorySearch] = useState('')
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [editingItem, setEditingItem] = useState<any>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chatMessages])
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatMessages])
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -200,10 +189,7 @@ export default function App() {
         setStats(data)
         const now = new Date()
         const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
-        setHistory(prev => {
-          const next = [...prev, { time, cpu: Math.round((data.load.load1 / data.cpus) * 100), mem: data.memory.pct }]
-          return next.slice(-20)
-        })
+        setHistory(prev => [...prev, { time, cpu: Math.round((data.load.load1 / data.cpus) * 100), mem: data.memory.pct }].slice(-20))
       } catch {}
     }
     fetchStats()
@@ -219,80 +205,62 @@ export default function App() {
 
   const categories = Array.from(new Set(capabilities.map(c => c.category)))
 
+  useEffect(() => {
+    if (activeTab !== 'inventory') return
+    const fetchInventory = async () => {
+      try {
+        const res = await fetch(`http://100.111.117.127:5174/api/inventory/items?category=${inventoryFilter}&search=${inventorySearch}`)
+        const data = await res.json()
+        setInventoryItems(data.items || [])
+      } catch {}
+    }
+    const fetchCategories = async () => {
+      try {
+        const res = await fetch('http://100.111.117.127:5174/api/inventory/categories')
+        const data = await res.json()
+        setInventoryCategories(data.categories || [])
+      } catch {}
+    }
+    fetchInventory()
+    fetchCategories()
+  }, [activeTab, inventoryFilter, inventorySearch])
+
   const renderContent = () => {
     switch (activeTab) {
+
       case 'dashboard':
-        return (
-          <div>
-            {/* Stats Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              <StatCard label="Total Capabilities" value={capabilities.length} trend={12} />
-              <StatCard label="Active Now" value={capabilities.filter(c => c.status === 'online').length} />
-              <StatCard label="Pending Setup" value={capabilities.filter(c => c.status === 'pending').length} />
-              <StatCard label="Connections" value={connectionData.length} />
+        return (<div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <StatCard label="Total Capabilities" value={capabilities.length} trend={12} />
+            <StatCard label="Active Now" value={capabilities.filter(c => c.status === 'online').length} />
+            <StatCard label="Pending Setup" value={capabilities.filter(c => c.status === 'pending').length} />
+            <StatCard label="Connections" value={connectionData.length} />
+          </div>
+          <div className="grid md:grid-cols-3 gap-6 mb-6">
+            <div className="card md:col-span-2">
+              <h2 className="text-lg font-semibold text-white mb-4">📈 Task Activity (Last 24h)</h2>
+              <ResponsiveContainer width="100%" height={220}><AreaChart data={tasksByHour}><CartesianGrid strokeDasharray="3 3" stroke="#334155" /><XAxis dataKey="hour" stroke="#94a3b8" fontSize={12} /><YAxis stroke="#94a3b8" fontSize={12} /><Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569' }} /><Area type="monotone" dataKey="tasks" stroke="#8b5cf6" fill="#8b5cf620" /></AreaChart></ResponsiveContainer>
             </div>
-
-            {/* Charts Row */}
-            <div className="grid md:grid-cols-3 gap-6 mb-6">
-              <div className="card md:col-span-2">
-                <h2 className="text-lg font-semibold text-white mb-4">📈 Task Activity (Last 24h)</h2>
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={tasksByHour}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis dataKey="hour" stroke="#94a3b8" fontSize={12} />
-                    <YAxis stroke="#94a3b8" fontSize={12} />
-                    <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569' }} />
-                    <Area type="monotone" dataKey="tasks" stroke="#8b5cf6" fill="#8b5cf620" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="card">
-                <h2 className="text-lg font-semibold text-white mb-4">🎯 Categories</h2>
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie data={categoryData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`} labelLine={false}>
-                      {categoryData.map((entry, i) => (
-                        <Cell key={i} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Connections Chart */}
-            <div className="card mb-6">
-              <h2 className="text-lg font-semibold text-white mb-4">🔗 Active Connections</h2>
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={connectionData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} angle={-20} textAnchor="end" height={60} />
-                  <YAxis stroke="#94a3b8" fontSize={12} />
-                  <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569' }} />
-                  <Bar dataKey="count" fill="#a855f7" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Recent Activity */}
             <div className="card">
-              <h2 className="text-lg font-semibold text-white mb-4">📜 Recent Activity</h2>
-              <div className="space-y-3">
-                {recentActivity.slice(0, 5).map(act => (
-                  <div key={act.id} className="flex items-center gap-4 bg-slate-900 rounded-lg p-3 border border-slate-700">
-                    <div className={`w-2 h-2 rounded-full ${act.status === 'success' ? 'bg-green-400' : act.status === 'warning' ? 'bg-amber-400' : 'bg-red-400'}`} />
-                    <div className="flex-1">
-                      <p className="text-sm text-slate-200">{act.action}</p>
-                      <p className="text-xs text-slate-500">{act.app}</p>
-                    </div>
-                    <span className="text-xs text-slate-500">{act.time}</span>
-                  </div>
-                ))}
-              </div>
+              <h2 className="text-lg font-semibold text-white mb-4">🎯 Categories</h2>
+              <ResponsiveContainer width="100%" height={220}><PieChart><Pie data={categoryData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`} labelLine={false}>{categoryData.map((entry, i) => (<Cell key={i} fill={entry.color} />))}</Pie><Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569' }} /></PieChart></ResponsiveContainer>
             </div>
           </div>
-        )
+          <div className="card mb-6">
+            <h2 className="text-lg font-semibold text-white mb-4">🔗 Active Connections</h2>
+            <ResponsiveContainer width="100%" height={250}><BarChart data={connectionData}><CartesianGrid strokeDasharray="3 3" stroke="#334155" /><XAxis dataKey="name" stroke="#94a3b8" fontSize={11} angle={-20} textAnchor="end" height={60} /><YAxis stroke="#94a3b8" fontSize={12} /><Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569' }} /><Bar dataKey="count" fill="#a855f7" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>
+          </div>
+          <div className="card">
+            <h2 className="text-lg font-semibold text-white mb-4">📜 Recent Activity</h2>
+            <div className="space-y-3">{recentActivity.slice(0, 5).map(act => (
+              <div key={act.id} className="flex items-center gap-4 bg-slate-900 rounded-lg p-3 border border-slate-700">
+                <div className={`w-2 h-2 rounded-full ${act.status === 'success' ? 'bg-green-400' : act.status === 'warning' ? 'bg-amber-400' : 'bg-red-400'}`} />
+                <div className="flex-1"><p className="text-sm text-slate-200">{act.action}</p><p className="text-xs text-slate-500">{act.app}</p></div>
+                <span className="text-xs text-slate-500">{act.time}</span>
+              </div>
+            ))}</div>
+          </div>
+        </div>)
 
       case 'chat':
         return (
@@ -300,209 +268,94 @@ export default function App() {
             <h2 className="text-lg font-semibold text-white mb-4">💬 Chat with Horus</h2>
             <div className="h-96 overflow-y-auto bg-slate-900 rounded-lg p-4 mb-4 space-y-3 border border-slate-700">
               {chatMessages.length === 0 && (
-                <div className="text-center text-slate-500 mt-16">
-                  <p className="text-4xl mb-2">🦅</p>
-                  <p>Chat with Horus directly from the dashboard.</p>
-                  <p className="text-sm mt-1">Type a message below to start.</p>
-                </div>
+                <div className="text-center text-slate-500 mt-16"><p className="text-4xl mb-2">🦅</p><p>Chat with Horus directly from the dashboard.</p><p className="text-sm mt-1">Type a message below to start.</p></div>
               )}
               {chatMessages.map((msg, i) => (
                 <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${
-                    msg.role === 'user'
-                      ? 'bg-violet-600 text-white rounded-br-sm'
-                      : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-sm'
-                  }`}>
+                  <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${msg.role === 'user' ? 'bg-violet-600 text-white rounded-br-sm' : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-sm'}`}>
                     <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                     {msg.role === 'assistant' && chatStats && i === chatMessages.length - 1 && (
-                      <div className="mt-2 pt-2 border-t border-slate-700/50 flex items-center gap-3 text-xs text-slate-500">
-                        <span>⏱ {chatStats.elapsed}s</span>
-                        <span>🧠 {chatStats.usage?.model || '—'}</span>
-                        <span>📊 {chatStats.usage?.total_tokens?.toLocaleString() || '—'} tokens</span>
-                        <span>🟢 {chatStats.usage?.input_tokens?.toLocaleString() || '—'} in</span>
-                        <span>🟣 {chatStats.usage?.output_tokens?.toLocaleString() || '—'} out</span>
-                        <span>⚡ {chatStats.usage?.reasoning_tokens?.toLocaleString() || '—'} reasoning</span>
-                        <span>💰 {chatStats.usage?.api_calls || '—'} calls</span>
+                      <div className="mt-2 pt-2 border-t border-slate-700/50 flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+                        <span>⏱ {chatStats.elapsed}s</span><span>🧠 {chatStats.usage?.model || '—'}</span><span>📊 {chatStats.usage?.total_tokens?.toLocaleString() || '—'} tokens</span><span>🟢 {chatStats.usage?.input_tokens?.toLocaleString() || '—'} in</span><span>🟣 {chatStats.usage?.output_tokens?.toLocaleString() || '—'} out</span>
                       </div>
                     )}
                   </div>
                 </div>
               ))}
-              {chatLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-slate-800 rounded-2xl px-4 py-2.5 text-violet-400 text-sm border border-slate-700 rounded-bl-sm">
-                    <span className="flex items-center gap-2">
-                      <span className="flex gap-1">
-                        <span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce" />
-                        <span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-                        <span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce [animation-delay:0.4s]" />
-                      </span>
-                      Thinking...
-                    </span>
-                  </div>
-                </div>
-              )}
+              {chatLoading && (<div className="flex justify-start"><div className="bg-slate-800 rounded-2xl px-4 py-2.5 text-violet-400 text-sm border border-slate-700 rounded-bl-sm"><span className="flex items-center gap-2"><span className="flex gap-1"><span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce" /><span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce [animation-delay:0.2s]" /><span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce [animation-delay:0.4s]" /></span>Thinking...</span></div></div>)}
               <div ref={chatEndRef} />
             </div>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault()
-                const text = chatInput.trim()
-                if (!text || chatLoading) return
-                setChatMessages(prev => [...prev, { role: 'user', content: text }])
-                setChatInput('')
-                setChatLoading(true)
-                try {
-                  const res = await fetch('http://100.111.117.127:5174/api/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: text }),
-                  })
-                  const reader = res.body?.getReader()
-                  const decoder = new TextDecoder()
-                  let assistantMsg = ''
-                  setChatMessages(prev => [...prev, { role: 'assistant', content: '' }])
-                  while (reader) {
-                    const { done, value } = await reader.read()
-                    if (done) break
-                    const chunk = decoder.decode(value)
-                    const lines = chunk.split('\n')
-                    for (const line of lines) {
-                      if (line.startsWith('data: ')) {
-                        try {
-                          const data = JSON.parse(line.slice(6))
-                          if (data.chunk !== undefined) {
-                            assistantMsg += data.chunk
-                            setChatMessages(prev => {
-                              const updated = [...prev]
-                              updated[updated.length - 1] = { role: 'assistant', content: assistantMsg }
-                              return updated
-                            })
-                            if (data.elapsed && data.usage) {
-                              setChatStats({ elapsed: data.elapsed, usage: data.usage })
-                            }
-                          }
-                        } catch {}
-                      }
-                    }
-                  }
-                } catch (err) {
-                  setChatMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err}` }])
-                } finally {
-                  setChatLoading(false)
-                }
-              }}
-              className="flex gap-2"
-            >
-              <input
-                type="text"
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                placeholder="Type a message to Horus..."
-                className="flex-1 bg-slate-900 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 transition-colors"
-              />
-              <button
-                type="submit"
-                disabled={chatLoading}
-                className="bg-violet-600 hover:bg-violet-700 text-white px-5 py-2.5 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-              >
-                Send
-              </button>
+            <form onSubmit={async (e) => {
+              e.preventDefault(); const text = chatInput.trim(); if (!text || chatLoading) return
+              setChatMessages(prev => [...prev, { role: 'user', content: text }]); setChatInput(''); setChatLoading(true)
+              try {
+                const res = await fetch('http://100.111.117.127:5174/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text }) })
+                const reader = res.body?.getReader(); const decoder = new TextDecoder(); let assistantMsg = ''
+                setChatMessages(prev => [...prev, { role: 'assistant', content: '' }])
+                while (reader) { const { done, value } = await reader.read(); if (done) break; const chunk = decoder.decode(value); const lines = chunk.split('\n'); for (const line of lines) { if (line.startsWith('data: ')) { try { const data = JSON.parse(line.slice(6)); if (data.chunk !== undefined) { assistantMsg += data.chunk; setChatMessages(prev => { const u = [...prev]; u[u.length - 1] = { role: 'assistant', content: assistantMsg }; return u }); if (data.elapsed && data.usage) setChatStats({ elapsed: data.elapsed, usage: data.usage }) } } catch {} } } }
+              } catch (err) { setChatMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err}` }]) } finally { setChatLoading(false) }
+            }} className="flex gap-2">
+              <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Type a message to Horus..." className="flex-1 bg-slate-900 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 transition-colors" />
+              <button type="submit" disabled={chatLoading} className="bg-violet-600 hover:bg-violet-700 text-white px-5 py-2.5 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium">Send</button>
             </form>
           </div>
         )
 
       case 'system':
+        return (<div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <StatCard label="CPU Cores" value={stats?.cpus ?? 0} /><StatCard label="CPU Load" value={stats?.load.load1 ?? 0} /><StatCard label="Memory" value={stats?.memory.pct ?? 0} suffix="%" /><StatCard label="Disk" value={stats?.disk.pct ?? 0} suffix="%" />
+          </div>
+          <div className="grid md:grid-cols-2 gap-6 mb-6">
+            <div className="card"><h2 className="text-lg font-semibold text-white mb-4">💾 Memory</h2><div className="flex items-center justify-between"><span className="text-xs text-slate-400">Used: {stats ? formatBytes(stats.memory.used) : '—'}</span><span className="text-xs text-slate-400">Total: {stats ? formatBytes(stats.memory.total) : '—'}</span></div><div className="overflow-hidden h-3 text-xs flex rounded bg-slate-700 mt-2"><div style={{ width: `${stats?.memory.pct ?? 0}%` }} className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-gradient-to-r from-violet-500 to-purple-600" /></div><div className="mt-2 text-sm text-slate-300">{stats?.memory.pct ?? 0}% utilized</div></div>
+            <div className="card"><h2 className="text-lg font-semibold text-white mb-4">📁 Disk</h2><div className="flex items-center justify-between"><span className="text-xs text-slate-400">Used: {stats ? formatBytes(stats.disk.used) : '—'}</span><span className="text-xs text-slate-400">Total: {stats ? formatBytes(stats.disk.total) : '—'}</span></div><div className="overflow-hidden h-3 text-xs flex rounded bg-slate-700 mt-2"><div style={{ width: `${stats?.disk.pct ?? 0}%` }} className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-gradient-to-r from-amber-500 to-orange-600" /></div><div className="mt-2 text-sm text-slate-300">{stats?.disk.pct ?? 0}% utilized</div></div>
+          </div>
+          <div className="card mb-6"><h2 className="text-lg font-semibold text-white mb-4">📊 Load Averages & Uptime</h2><div className="grid grid-cols-4 gap-4 text-center"><div><div className="text-2xl font-bold text-violet-400">{stats?.load.load1?.toFixed(2) ?? '—'}</div><div className="text-xs text-slate-500 mt-1">1m</div></div><div><div className="text-2xl font-bold text-blue-400">{stats?.load.load5?.toFixed(2) ?? '—'}</div><div className="text-xs text-slate-500 mt-1">5m</div></div><div><div className="text-2xl font-bold text-green-400">{stats?.load.load15?.toFixed(2) ?? '—'}</div><div className="text-xs text-slate-500 mt-1">15m</div></div><div><div className="text-2xl font-bold text-amber-400">{stats ? formatUptime(stats.uptime) : '—'}</div><div className="text-xs text-slate-500 mt-1">Uptime</div></div></div></div>
+          <div className="card mb-6"><h2 className="text-lg font-semibold text-white mb-4">📈 Load History</h2><ResponsiveContainer width="100%" height={200}><LineChart data={history}><CartesianGrid strokeDasharray="3 3" stroke="#334155" /><XAxis dataKey="time" stroke="#94a3b8" fontSize={12} /><YAxis stroke="#94a3b8" fontSize={12} /><Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569' }} /><Line type="monotone" dataKey="cpu" stroke="#8b5cf6" strokeWidth={2} name="CPU %" dot={false} /><Line type="monotone" dataKey="mem" stroke="#22c55e" strokeWidth={2} name="Memory %" dot={false} /></LineChart></ResponsiveContainer></div>
+          <div className="card"><h2 className="text-lg font-semibold text-white mb-4">⚡ Top Processes by CPU</h2><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-slate-500 border-b border-slate-700"><th className="pb-2 pr-4">PID</th><th className="pb-2 pr-4">USER</th><th className="pb-2 pr-4">CPU%</th><th className="pb-2 pr-4">MEM%</th><th className="pb-2">COMMAND</th></tr></thead><tbody>{stats?.processes.map(proc => (<tr key={proc.pid} className="border-b border-slate-700/50 hover:bg-slate-800/50"><td className="py-2 pr-4 text-slate-400 font-mono">{proc.pid}</td><td className="py-2 pr-4 text-slate-400">{proc.user}</td><td className="py-2 pr-4"><span className={`font-medium ${proc.cpu > 50 ? 'text-red-400' : proc.cpu > 10 ? 'text-amber-400' : 'text-green-400'}`}>{proc.cpu}%</span></td><td className="py-2 pr-4 text-slate-300">{proc.mem}%</td><td className="py-2 text-slate-300 font-mono text-xs truncate max-w-xs">{proc.command}</td></tr>))}</tbody></table></div></div>
+          <div className="mt-4 text-center"><span className="text-xs text-slate-500">Last updated: {stats ? new Date(stats.timestamp).toLocaleTimeString() : '—'} • Auto-refreshes every 2s</span></div>
+        </div>)
+
+      case 'inventory':
         return (
           <div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              <StatCard label="CPU Cores" value={stats?.cpus ?? 0} />
-              <StatCard label="CPU Load" value={stats?.load.load1?.toFixed(1) ?? '0'} trend={stats ? Math.round((stats.load.load1 / stats.cpus) * 100) : 0} />
-              <StatCard label="Memory" value={stats?.memory.pct ?? 0} suffix="%" />
-              <StatCard label="Disk" value={stats?.disk.pct ?? 0} suffix="%" />
+            <div className="flex items-center justify-between mb-6">
+              <div><h1 className="text-2xl font-bold text-white">🛒 Inventory</h1><p className="text-sm text-slate-400">Manage your household stock</p></div>
+              <button onClick={() => setShowAddModal(true)} className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-xl font-medium text-sm">+ Add Item</button>
             </div>
-            <div className="grid md:grid-cols-2 gap-6 mb-6">
-              <div className="card">
-                <h2 className="text-lg font-semibold text-white mb-4">💾 Memory</h2>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-400">Used: {stats ? formatBytes(stats.memory.used) : '—'}</span>
-                  <span className="text-xs text-slate-400">Total: {stats ? formatBytes(stats.memory.total) : '—'}</span>
-                </div>
-                <div className="overflow-hidden h-3 text-xs flex rounded bg-slate-700 mt-2">
-                  <div style={{ width: `${stats?.memory.pct ?? 0}%` }} className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-gradient-to-r from-violet-500 to-purple-600 transition-all duration-500" />
-                </div>
-                <div className="mt-2 text-sm text-slate-300">{stats?.memory.pct ?? 0}% utilized</div>
-              </div>
-              <div className="card">
-                <h2 className="text-lg font-semibold text-white mb-4">📁 Disk</h2>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-400">Used: {stats ? formatBytes(stats.disk.used) : '—'}</span>
-                  <span className="text-xs text-slate-400">Total: {stats ? formatBytes(stats.disk.total) : '—'}</span>
-                </div>
-                <div className="overflow-hidden h-3 text-xs flex rounded bg-slate-700 mt-2">
-                  <div style={{ width: `${stats?.disk.pct ?? 0}%` }} className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-gradient-to-r from-amber-500 to-orange-600 transition-all duration-500" />
-                </div>
-                <div className="mt-2 text-sm text-slate-300">{stats?.disk.pct ?? 0}% utilized</div>
-              </div>
+            <div className="flex flex-wrap gap-4 mb-6">
+              <input type="text" placeholder="🔍 Search items..." value={inventorySearch} onChange={e => setInventorySearch(e.target.value)} className="flex-1 bg-slate-900 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500" />
+              <select value={inventoryFilter} onChange={e => setInventoryFilter(e.target.value)} className="bg-slate-900 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500"><option value="all">All Categories</option>{inventoryCategories.map(cat => (<option key={cat} value={cat}>{cat}</option>))}</select>
             </div>
-            <div className="card mb-6">
-              <h2 className="text-lg font-semibold text-white mb-4">📊 Load Averages & Uptime</h2>
-              <div className="grid grid-cols-4 gap-4 text-center">
-                <div><div className="text-2xl font-bold text-violet-400">{stats?.load.load1?.toFixed(2) ?? '—'}</div><div className="text-xs text-slate-500 mt-1">1m</div></div>
-                <div><div className="text-2xl font-bold text-blue-400">{stats?.load.load5?.toFixed(2) ?? '—'}</div><div className="text-xs text-slate-500 mt-1">5m</div></div>
-                <div><div className="text-2xl font-bold text-green-400">{stats?.load.load15?.toFixed(2) ?? '—'}</div><div className="text-xs text-slate-500 mt-1">15m</div></div>
-                <div><div className="text-2xl font-bold text-amber-400">{stats ? formatUptime(stats.uptime) : '—'}</div><div className="text-xs text-slate-500 mt-1">Uptime</div></div>
-              </div>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {inventoryItems.map(item => {
+                const isLowStock = item.quantity <= item.min_stock
+                return (
+                  <div key={item.id} className={`bg-slate-800 rounded-xl p-4 border ${isLowStock ? 'border-red-500/50' : 'border-slate-700'} hover:border-violet-500/50 transition-colors`}>
+                    <div className="flex items-start justify-between mb-3">
+                      <div><h3 className="font-medium text-white text-sm">{item.name}</h3><span className="text-xs text-slate-500">{item.category}</span></div>
+                      {isLowStock && <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded-full border border-red-500/30">⚠️ Low</span>}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <button onClick={async () => { await fetch(`http://100.111.117.127:5174/api/inventory/items/${item.id}/quantity`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delta: -1 }) }); setInventoryItems(prev => prev.map(i => i.id === item.id ? { ...i, quantity: Math.max(0, i.quantity - 1) } : i)) }} className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 text-white flex items-center justify-center text-sm">-</button>
+                        <span className={`text-xl font-bold ${isLowStock ? 'text-red-400' : 'text-white'}`}>{item.quantity}</span>
+                        <button onClick={async () => { await fetch(`http://100.111.117.127:5174/api/inventory/items/${item.id}/quantity`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delta: 1 }) }); setInventoryItems(prev => prev.map(i => i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i)) }} className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 text-white flex items-center justify-center text-sm">+</button>
+                        <span className="text-sm text-slate-500">{item.unit}</span>
+                      </div>
+                      <div className="flex gap-1">
+                        <button onClick={() => setEditingItem(item)} className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-400 flex items-center justify-center">✏️</button>
+                        <button onClick={async () => { if (confirm(`Delete ${item.name}?`)) { await fetch(`http://100.111.117.127:5174/api/inventory/items/${item.id}`, { method: 'DELETE' }); setInventoryItems(prev => prev.filter(i => i.id !== item.id)) } }} className="w-8 h-8 rounded-lg bg-slate-700 hover:bg-red-600/20 text-slate-400 hover:text-red-400 flex items-center justify-center">🗑️</button>
+                      </div>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-slate-700/50 flex justify-between"><span className="text-xs text-slate-600">Min: {item.min_stock} {item.unit}</span><span className="text-xs text-slate-600">{new Date(item.last_updated).toLocaleDateString()}</span></div>
+                  </div>
+                )
+              })}
             </div>
-            <div className="card mb-6">
-              <h2 className="text-lg font-semibold text-white mb-4">📈 Load History</h2>
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={history}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="time" stroke="#94a3b8" fontSize={12} />
-                  <YAxis stroke="#94a3b8" fontSize={12} />
-                  <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #475569' }} />
-                  <Line type="monotone" dataKey="cpu" stroke="#8b5cf6" strokeWidth={2} name="CPU %" dot={false} />
-                  <Line type="monotone" dataKey="mem" stroke="#22c55e" strokeWidth={2} name="Memory %" dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="card">
-              <h2 className="text-lg font-semibold text-white mb-4">⚡ Top Processes by CPU</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-slate-500 border-b border-slate-700">
-                      <th className="pb-2 pr-4">PID</th>
-                      <th className="pb-2 pr-4">USER</th>
-                      <th className="pb-2 pr-4">CPU%</th>
-                      <th className="pb-2 pr-4">MEM%</th>
-                      <th className="pb-2">COMMAND</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stats?.processes.map(proc => (
-                      <tr key={proc.pid} className="border-b border-slate-700/50 hover:bg-slate-800/50">
-                        <td className="py-2 pr-4 text-slate-400 font-mono">{proc.pid}</td>
-                        <td className="py-2 pr-4 text-slate-400">{proc.user}</td>
-                        <td className="py-2 pr-4">
-                          <span className={`font-medium ${proc.cpu > 50 ? 'text-red-400' : proc.cpu > 10 ? 'text-amber-400' : 'text-green-400'}`}>
-                            {proc.cpu}%
-                          </span>
-                        </td>
-                        <td className="py-2 pr-4 text-slate-300">{proc.mem}%</td>
-                        <td className="py-2 text-slate-300 font-mono text-xs truncate max-w-xs">{proc.command}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div className="mt-4 text-center">
-              <span className="text-xs text-slate-500">
-                Last updated: {stats ? new Date(stats.timestamp).toLocaleTimeString() : '—'} • Auto-refreshes every 2s
-              </span>
-            </div>
+            {inventoryItems.length === 0 && (
+              <div className="text-center text-slate-500 mt-16"><p className="text-4xl mb-2">📦</p><p>No items found.</p><button onClick={() => setShowAddModal(true)} className="mt-3 text-violet-400 hover:text-violet-300 text-sm">+ Add your first item</button></div>
+            )}
           </div>
         )
 
@@ -511,41 +364,16 @@ export default function App() {
           <div className="card">
             <h2 className="text-lg font-semibold text-white mb-4">⚡ Capabilities</h2>
             <div className="flex flex-wrap gap-4 mb-6">
-              <input
-                type="text"
-                placeholder="🔍 Search capabilities..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500"
-              />
-              <select
-                value={filter}
-                onChange={e => setFilter(e.target.value)}
-                className="bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-slate-200 focus:outline-none focus:border-violet-500"
-              >
-                <option value="all">All Categories</option>
-                {categories.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
+              <input type="text" placeholder="🔍 Search capabilities..." value={search} onChange={e => setSearch(e.target.value)} className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500" />
+              <select value={filter} onChange={e => setFilter(e.target.value)} className="bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-slate-200 focus:outline-none focus:border-violet-500"><option value="all">All Categories</option>{categories.map(cat => (<option key={cat} value={cat}>{cat}</option>))}</select>
             </div>
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filtered.map(cap => (
                 <div key={cap.id} className="bg-slate-900 rounded-lg p-4 border border-slate-700 hover:border-violet-500 transition-colors">
-                  <div className="flex items-start justify-between mb-2">
-                    <h3 className="font-semibold text-white text-sm">{cap.name}</h3>
-                    <StatusBadge status={cap.status} />
-                  </div>
+                  <div className="flex items-start justify-between mb-2"><h3 className="font-semibold text-white text-sm">{cap.name}</h3><StatusBadge status={cap.status} /></div>
                   <p className="text-xs text-slate-400 mb-3">{cap.description}</p>
-                  <div className="flex flex-wrap gap-1 mb-2">
-                    {cap.connections.map(conn => (
-                      <span key={conn} className="badge badge-blue">{conn}</span>
-                    ))}
-                  </div>
-                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-700">
-                    <span className="text-xs text-slate-500">{cap.category}</span>
-                    <span className="text-xs text-violet-400">{cap.usage} uses</span>
-                  </div>
+                  <div className="flex flex-wrap gap-1 mb-2">{cap.connections.map(conn => (<span key={conn} className="badge badge-blue">{conn}</span>))}</div>
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-700"><span className="text-xs text-slate-500">{cap.category}</span><span className="text-xs text-violet-400">{cap.usage} uses</span></div>
                 </div>
               ))}
             </div>
@@ -556,25 +384,13 @@ export default function App() {
         return (
           <div className="card">
             <h2 className="text-lg font-semibold text-white mb-4">📜 Recent Activity</h2>
-            <div className="flex items-center justify-between mb-4">
-              <select value={timeRange} onChange={e => setTimeRange(e.target.value)} className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-1 text-sm text-slate-200">
-                <option value="1h">Last hour</option>
-                <option value="24h">Last 24 hours</option>
-                <option value="7d">Last 7 days</option>
-              </select>
-            </div>
-            <div className="space-y-3">
-              {recentActivity.map(act => (
-                <div key={act.id} className="flex items-center gap-4 bg-slate-900 rounded-lg p-3 border border-slate-700">
-                  <div className={`w-2 h-2 rounded-full ${act.status === 'success' ? 'bg-green-400' : act.status === 'warning' ? 'bg-amber-400' : 'bg-red-400'}`} />
-                  <div className="flex-1">
-                    <p className="text-sm text-slate-200">{act.action}</p>
-                    <p className="text-xs text-slate-500">{act.app}</p>
-                  </div>
-                  <span className="text-xs text-slate-500">{act.time}</span>
-                </div>
-              ))}
-            </div>
+            <div className="space-y-3">{recentActivity.map(act => (
+              <div key={act.id} className="flex items-center gap-4 bg-slate-900 rounded-lg p-3 border border-slate-700">
+                <div className={`w-2 h-2 rounded-full ${act.status === 'success' ? 'bg-green-400' : act.status === 'warning' ? 'bg-amber-400' : 'bg-red-400'}`} />
+                <div className="flex-1"><p className="text-sm text-slate-200">{act.action}</p><p className="text-xs text-slate-500">{act.app}</p></div>
+                <span className="text-xs text-slate-500">{act.time}</span>
+              </div>
+            ))}</div>
           </div>
         )
 
@@ -586,13 +402,8 @@ export default function App() {
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
               {connectionData.map(conn => (
                 <div key={conn.name} className="flex items-center justify-between bg-slate-900 rounded-lg p-4 border border-slate-700">
-                  <div>
-                    <p className="font-medium text-white text-sm">{conn.name}</p>
-                    <p className="text-xs text-slate-500">{conn.count} capability{conn.count !== 1 ? 's' : ''}</p>
-                  </div>
-                  <div className="w-10 h-10 rounded-full bg-violet-900/50 border border-violet-500 flex items-center justify-center text-violet-400 font-bold text-sm">
-                    {conn.count}
-                  </div>
+                  <div><p className="font-medium text-white text-sm">{conn.name}</p><p className="text-xs text-slate-500">{conn.count} capability{conn.count !== 1 ? 's' : ''}</p></div>
+                  <div className="w-10 h-10 rounded-full bg-violet-900/50 border border-violet-500 flex items-center justify-center text-violet-400 font-bold text-sm">{conn.count}</div>
                 </div>
               ))}
             </div>
@@ -608,36 +419,56 @@ export default function App() {
     <div className="flex min-h-screen bg-slate-900">
       {/* Sidebar */}
       <aside className="w-64 bg-slate-900 border-r border-slate-700 p-6 flex flex-col">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white">🦅 Horus</h1>
-          <p className="text-sm text-slate-500">System Monitor</p>
-        </div>
+        <div className="mb-8"><h1 className="text-2xl font-bold text-white">🦅 Horus</h1><p className="text-sm text-slate-500">System Monitor</p></div>
         <nav className="flex-1 space-y-1">
           {navItems.map(item => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
-                activeTab === item.id
-                  ? 'bg-violet-600/20 text-violet-400 border-l-2 border-violet-500 font-medium'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white border-l-2 border-transparent'
-              }`}
-            >
-              <span className="text-lg">{item.icon}</span>
-              <span>{item.label}</span>
+            <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${activeTab === item.id ? 'bg-violet-600/20 text-violet-400 border-l-2 border-violet-500 font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-white border-l-2 border-transparent'}`}>
+              <span className="text-lg">{item.icon}</span><span>{item.label}</span>
             </button>
           ))}
         </nav>
-        <div className="mt-auto pt-6 border-t border-slate-700">
-          <p className="text-xs text-slate-600">Horus v1.0</p>
-          <p className="text-xs text-slate-600">Maya's Instance</p>
-        </div>
+        <div className="mt-auto pt-6 border-t border-slate-700"><p className="text-xs text-slate-600">Horus v1.0</p><p className="text-xs text-slate-600">Maya's Instance</p></div>
       </aside>
-
       {/* Main Content */}
-      <main className="flex-1 p-6 overflow-y-auto">
-        {renderContent()}
-      </main>
+      <main className="flex-1 p-6 overflow-y-auto">{renderContent()}</main>
+
+      {/* Add/Edit Modal */}
+      {(showAddModal || editingItem) && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowAddModal(false); setEditingItem(null) }}>
+          <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-md border border-slate-700" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-white mb-4">{editingItem ? 'Edit Item' : 'Add New Item'}</h2>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              const form = e.target as any
+              const data = { name: form.name.value, category: form.category.value, quantity: Number(form.quantity.value), unit: form.unit.value, min_stock: Number(form.min_stock.value), notes: form.notes.value }
+              if (editingItem) {
+                await fetch(`http://100.111.117.127:5174/api/inventory/items/${editingItem.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+              } else {
+                await fetch('http://100.111.117.127:5174/api/inventory/items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+              }
+              setShowAddModal(false); setEditingItem(null)
+              // Refresh
+              const res = await fetch(`http://100.111.117.127:5174/api/inventory/items?category=${inventoryFilter}&search=${inventorySearch}`)
+              const d = await res.json(); setInventoryItems(d.items || [])
+            }}>
+              <div className="space-y-3">
+                <input name="name" placeholder="Item name" defaultValue={editingItem?.name || ''} required className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
+                <select name="category" defaultValue={editingItem?.category || 'Other'} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500"><option value="all">All Categories</option>{inventoryCategories.map(cat => (<option key={cat} value={cat}>{cat}</option>))}</select>
+                <div className="flex gap-2">
+                  <input name="quantity" type="number" placeholder="Quantity" defaultValue={editingItem?.quantity || 0} required className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
+                  <input name="unit" placeholder="Unit (pcs, kg, etc)" defaultValue={editingItem?.unit || 'pcs'} className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
+                </div>
+                <input name="min_stock" type="number" placeholder="Minimum stock warning" defaultValue={editingItem?.min_stock || 0} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
+                <textarea name="notes" placeholder="Notes (optional)" defaultValue={editingItem?.notes || ''} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500 h-20 resize-none" />
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button type="button" onClick={() => { setShowAddModal(false); setEditingItem(null) }} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg">Cancel</button>
+                <button type="submit" className="flex-1 bg-violet-600 hover:bg-violet-700 text-white py-2 rounded-lg font-medium">{editingItem ? 'Save' : 'Add'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
