@@ -297,7 +297,7 @@ export default function App() {
         return (
           <div className="card">
             <h2 className="text-lg font-semibold text-white mb-4">💬 Chat with Horus</h2>
-            <div className="h-96 overflow-y-auto bg-slate-900 rounded-lg p-4 mb-4 space-y-4 border border-slate-700">
+            <div className="h-96 overflow-y-auto bg-slate-900 rounded-lg p-4 mb-4 space-y-3 border border-slate-700">
               {chatMessages.length === 0 && (
                 <div className="text-center text-slate-500 mt-16">
                   <p className="text-4xl mb-2">🦅</p>
@@ -307,19 +307,26 @@ export default function App() {
               )}
               {chatMessages.map((msg, i) => (
                 <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] rounded-lg p-3 text-sm ${
+                  <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${
                     msg.role === 'user'
-                      ? 'bg-violet-600 text-white'
-                      : 'bg-slate-800 text-slate-200 border border-slate-700'
+                      ? 'bg-violet-600 text-white rounded-br-sm'
+                      : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-sm'
                   }`}>
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                    <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                   </div>
                 </div>
               ))}
               {chatLoading && (
                 <div className="flex justify-start">
-                  <div className="bg-slate-800 rounded-lg p-3 text-violet-400 text-sm border border-slate-700">
-                    ⏳ Thinking...
+                  <div className="bg-slate-800 rounded-2xl px-4 py-2.5 text-violet-400 text-sm border border-slate-700 rounded-bl-sm">
+                    <span className="flex items-center gap-2">
+                      <span className="flex gap-1">
+                        <span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce" />
+                        <span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+                        <span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce [animation-delay:0.4s]" />
+                      </span>
+                      Thinking...
+                    </span>
                   </div>
                 </div>
               )}
@@ -377,12 +384,12 @@ export default function App() {
                 value={chatInput}
                 onChange={e => setChatInput(e.target.value)}
                 placeholder="Type a message to Horus..."
-                className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500"
+                className="flex-1 bg-slate-900 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500 transition-colors"
               />
               <button
                 type="submit"
                 disabled={chatLoading}
-                className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+                className="bg-violet-600 hover:bg-violet-700 text-white px-5 py-2.5 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
               >
                 Send
               </button>

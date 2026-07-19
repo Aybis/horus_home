@@ -1,7 +1,6 @@
 const express = require('express');
 const { cpus, totalmem, loadavg, uptime } = require('os');
-const { execSync, spawn } = require('child_process');
-const path = require('path');
+const { execSync, exec } = require('child_process');
 
 const app = express();
 const PORT = 5174;
@@ -78,7 +77,7 @@ app.get('/api/stats', (req, res) => {
   }
 });
 
-// Chat endpoint - spawn hermes chat -q and parse output
+// Chat endpoint - use hermes -z (oneshot mode)
 app.post('/api/chat', (req, res) => {
   let body = '';
   req.on('data', chunk => body += chunk);
@@ -95,35 +94,20 @@ app.post('/api/chat', (req, res) => {
       res.setHeader('Connection', 'keep-alive');
 
       const hermesPath = '/Users/horus/.hermes/hermes-agent/venv/bin/hermes';
-      const child = spawn('bash', [hermesPath, 'chat', '-q', prompt], {
-        cwd: '/Users/horus',
-        env: { ...process.env, TERM: 'dumb', PYTHONUNBUFFERED: '1' },
-      });
-
-      let output = '';
-      child.stdout.on('data', (data) => { output += data.toString(); });
-      child.stderr.on('data', (data) => { output += data.toString(); });
-
-      child.on('close', (code) => {
-        // Parse the Hermes output to extract the actual answer
-        let answer = output;
-        
-        // Find response in Hermes box format
-        const boxStart = output.indexOf('╭─ ⚕ Hermes');
-        if (boxStart !== -1) {
-          const boxEnd = output.indexOf('╰─', boxStart);
-          if (boxEnd !== -1) {
-            answer = output.substring(boxStart + 1, boxEnd).split('\n').slice(1, -1).map(l => l.replace(/^    /, '')).join('\n').trim();
-          }
-        }
-        
-        res.write(`data: ${JSON.stringify({ chunk: answer })}\n\n`);
-        res.write(`data: ${JSON.stringify({ done: true, code })}\n\n`);
+      const safePrompt = prompt.replace(/'/g, "'\\''");
+      const cmd = `"${hermesPath}" -z '${safePrompt}' 2>&1`;
+      
+      console.log('[CHAT CMD]', cmd);
+      
+      exec(cmd, { cwd: '/Users/horus', timeout: 120000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+        console.log('[CHAT RESULT]', { error: error?.message, stdout: stdout?.trim()?.slice(0, 200) });
+        const output = (stdout || '').trim() || (stderr || '').trim() || 'No response';
+        res.write(`data: ${JSON.stringify({ chunk: output })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
         res.end();
       });
-
-      req.on('close', () => child.kill());
     } catch (err) {
+      console.error('[CHAT ERROR]', err);
       res.status(500).json({ error: err.message });
     }
   });
