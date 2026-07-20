@@ -142,7 +142,7 @@ const StatCard = ({ label, value, suffix, trend }: Stat & { trend?: number }) =>
   </div>
 )
 
-type TabId = 'dashboard' | 'chat' | 'system' | 'inventory' | 'capabilities' | 'activity' | 'connections'
+type TabId = 'dashboard' | 'chat' | 'system' | 'inventory' | 'invoice' | 'capabilities' | 'activity' | 'connections'
 
 interface NavItem {
   id: TabId; icon: string; label: string
@@ -153,6 +153,7 @@ const navItems: NavItem[] = [
   { id: 'chat', icon: '💬', label: 'Chat' },
   { id: 'system', icon: '🖥️', label: 'System' },
   { id: 'inventory', icon: '🛒', label: 'Inventory' },
+  { id: 'invoice', icon: '🧾', label: 'Invoice' },
   { id: 'capabilities', icon: '⚡', label: 'Capabilities' },
   { id: 'activity', icon: '📜', label: 'Activity Log' },
   { id: 'connections', icon: '🔗', label: 'Connections' },
@@ -178,6 +179,13 @@ export default function App() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false)
   const [editingItem, setEditingItem] = useState<any>(null)
+  const [invoiceList, setInvoiceList] = useState<any[]>([])
+  const [invoiceDetail, setInvoiceDetail] = useState<any>(null)
+  const [invoiceFilter, setInvoiceFilter] = useState<string>('all')
+  const [invoiceSearch, setInvoiceSearch] = useState('')
+  const [showAddInvoiceModal, setShowAddInvoiceModal] = useState(false)
+  const [editingInvoice, setEditingInvoice] = useState<any>(null)
+  const [showScanModal, setShowScanModal] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatMessages])
@@ -219,12 +227,28 @@ export default function App() {
       try {
         const res = await fetch('http://100.111.117.127:5174/api/inventory/categories')
         const data = await res.json()
-        setInventoryCategories(data.categories || [])
+        setInventoryCategories(d.categories || [])
       } catch {}
     }
     fetchInventory()
     fetchCategories()
   }, [activeTab, inventoryFilter, inventorySearch])
+
+  // Invoice fetch
+  useEffect(() => {
+    if (activeTab !== 'invoice') return
+    const fetchInvoices = async () => {
+      try {
+        const params = new URLSearchParams()
+        if (invoiceFilter !== 'all') params.set('status', invoiceFilter)
+        if (invoiceSearch) params.set('vendor', invoiceSearch)
+        const res = await fetch(`http://100.111.117.127:5174/api/invoices?${params.toString()}`)
+        const data = await res.json()
+        setInvoiceList(data.invoices || [])
+      } catch {}
+    }
+    fetchInvoices()
+  }, [activeTab, invoiceFilter, invoiceSearch])
 
   const renderContent = () => {
     switch (activeTab) {
@@ -363,7 +387,154 @@ export default function App() {
           </div>
         )
 
-      case 'capabilities':
+      case 'invoice':
+        return (
+          <div>
+            {/* Invoice Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div><h1 className="text-2xl font-bold text-white">🧾 Invoice</h1><p className="text-sm text-slate-400">Manage invoices and receipts</p></div>
+              <div className="flex gap-2">
+                <button onClick={() => setShowScanModal(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl text-sm">📷 Scan</button>
+                <button onClick={() => { setEditingInvoice(null); setShowAddInvoiceModal(true) }} className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-xl font-medium text-sm">+ Add Invoice</button>
+              </div>
+            </div>
+
+            {/* Filters */}
+            <div className="flex flex-wrap gap-4 mb-6">
+              <input type="text" placeholder="🔍 Search vendor..." value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)} className="flex-1 bg-slate-900 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500" />
+              <select value={invoiceFilter} onChange={e => setInvoiceFilter(e.target.value)} className="bg-slate-900 border border-slate-600 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-violet-500"><option value="all">All Status</option><option value="paid">Paid</option><option value="unpaid">Unpaid</option></select>
+            </div>
+
+            {/* Invoice List */}
+            <div className="grid gap-4">
+              {invoiceList.map(invoice => (
+                <div key={invoice.id} className="bg-slate-800 rounded-xl p-4 border border-slate-700 hover:border-violet-500/50 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-1">
+                        <h3 className="font-medium text-white">{invoice.vendor}</h3>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${invoice.status === 'paid' ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'}`}>{invoice.status}</span>
+                        <span className="text-xs text-slate-500">{invoice.category}</span>
+                      </div>
+                      <div className="text-sm text-slate-400">#{invoice.invoice_number || '—'} • {invoice.date || 'No date'}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-bold text-white">{(invoice.total || 0).toLocaleString()} <span className="text-xs text-slate-500">{invoice.currency}</span></div>
+                      <div className="text-xs text-slate-500">Subtotal: {(invoice.subtotal || 0).toLocaleString()}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-slate-700/50 flex justify-end gap-2">
+                    <button onClick={async () => { const res = await fetch(`http://100.111.117.127:5174/api/invoices/${invoice.id}`); const data = await res.json(); setInvoiceDetail(data) }} className="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded-lg text-slate-300">View</button>
+                    <button onClick={() => { setEditingInvoice(invoice); setShowAddInvoiceModal(true) }} className="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded-lg text-slate-300">Edit</button>
+                    <button onClick={async () => { if (confirm('Delete this invoice?')) { await fetch(`http://100.111.117.127:5174/api/invoices/${invoice.id}`, { method: 'DELETE' }); setInvoiceList(prev => prev.filter(i => i.id !== invoice.id)) } }} className="text-xs bg-slate-700 hover:bg-red-500/20 px-3 py-1 rounded-lg text-red-400">Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {invoiceList.length === 0 && (
+              <div className="text-center text-slate-500 mt-16"><p className="text-4xl mb-2">🧾</p><p>No invoices found.</p><button onClick={() => setShowScanModal(true)} className="mt-3 text-emerald-400 hover:text-emerald-300 text-sm">📷 Scan your first invoice</button></div>
+            )}
+
+            {/* Invoice Detail Modal */}
+            {invoiceDetail && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setInvoiceDetail(null)}>
+                <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-lg border border-slate-700 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                  <h2 className="text-lg font-semibold text-white mb-4">{invoiceDetail.invoice.vendor}</h2>
+                  <div className="space-y-3 mb-4">
+                    <div className="flex justify-between"><span className="text-sm text-slate-400">Invoice #</span><span className="text-sm text-white">{invoiceDetail.invoice.invoice_number || '—'}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-slate-400">Date</span><span className="text-sm text-white">{invoiceDetail.invoice.date || '—'}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-slate-400">Status</span><span className={`text-sm px-2 py-0.5 rounded-full ${invoiceDetail.invoice.status === 'paid' ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/20 text-amber-400'}`}>{invoiceDetail.invoice.status}</span></div>
+                    <div className="flex justify-between"><span className="text-sm text-slate-400">Category</span><span className="text-sm text-white">{invoiceDetail.invoice.category}</span></div>
+                  </div>
+                  {invoiceDetail.items && invoiceDetail.items.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-medium text-slate-400 mb-2">Items</h3>
+                      <div className="bg-slate-900 rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead><tr className="text-left text-slate-500 border-b border-slate-700"><th className="p-2">Description</th><th className="p-2 text-right">Qty</th><th className="p-2 text-right">Price</th><th className="p-2 text-right">Total</th></tr></thead>
+                          <tbody>{invoiceDetail.items.map((item: any, i: number) => (<tr key={i} className="border-b border-slate-700/50"><td className="p-2 text-white">{item.description}</td><td className="p-2 text-right text-slate-300">{item.quantity}</td><td className="p-2 text-right text-slate-300">{item.unit_price?.toLocaleString()}</td><td className="p-2 text-right text-white">{item.total?.toLocaleString()}</td></tr>))}</tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                  <div className="mt-4 pt-4 border-t border-slate-700 space-y-2">
+                    <div className="flex justify-between"><span className="text-slate-400">Subtotal</span><span className="text-white">{invoiceDetail.invoice.subtotal?.toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Tax</span><span className="text-white">{invoiceDetail.invoice.tax?.toLocaleString()}</span></div>
+                    <div className="flex justify-between text-lg font-bold"><span className="text-white">Total</span><span className="text-violet-400">{invoiceDetail.invoice.total?.toLocaleString()} {invoiceDetail.invoice.currency}</span></div>
+                  </div>
+                  <button onClick={() => setInvoiceDetail(null)} className="w-full mt-4 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg">Close</button>
+                </div>
+              </div>
+            )}
+
+            {/* Add/Edit Invoice Modal */}
+            {showAddInvoiceModal && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setShowAddInvoiceModal(false); setEditingInvoice(null) }}>
+                <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-md border border-slate-700" onClick={e => e.stopPropagation()}>
+                  <h2 className="text-lg font-semibold text-white mb-4">{editingInvoice ? 'Edit Invoice' : 'Add Invoice'}</h2>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault(); const form = e.target as any
+                    const data = { invoice_number: form.invoice_number.value, vendor: form.vendor.value, date: form.date.value, subtotal: Number(form.subtotal.value) || 0, tax: Number(form.tax.value) || 0, total: Number(form.total.value) || 0, currency: form.currency.value, category: form.category.value, notes: form.notes.value, status: form.status.value || 'unpaid' }
+                    if (editingInvoice) { await fetch(`http://100.111.117.127:5174/api/invoices/${editingInvoice.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }) } else { await fetch('http://100.111.117.127:5174/api/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }) }
+                    setShowAddInvoiceModal(false); setEditingInvoice(null)
+                    const params = new URLSearchParams(); if (invoiceFilter !== 'all') params.set('status', invoiceFilter); if (invoiceSearch) params.set('vendor', invoiceSearch)
+                    const res = await fetch(`http://100.111.117.127:5174/api/invoices?${params.toString()}`); const d = await res.json(); setInvoiceList(d.invoices || [])
+                  }}>
+                    <div className="space-y-3">
+                      <input name="invoice_number" placeholder="Invoice number" defaultValue={editingInvoice?.invoice_number || ''} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
+                      <input name="vendor" placeholder="Vendor name" defaultValue={editingInvoice?.vendor || ''} required className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
+                      <input name="date" type="date" defaultValue={editingInvoice?.date || ''} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
+                      <div className="flex gap-2">
+                        <input name="subtotal" type="number" placeholder="Subtotal" defaultValue={editingInvoice?.subtotal || 0} required className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
+                        <input name="tax" type="number" placeholder="Tax" defaultValue={editingInvoice?.tax || 0} className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
+                      </div>
+                      <input name="total" type="number" placeholder="Total" defaultValue={editingInvoice?.total || 0} required className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
+                      <div className="flex gap-2">
+                        <select name="currency" defaultValue={editingInvoice?.currency || 'IDR'} className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200"><option value="IDR">IDR</option><option value="USD">USD</option><option value="EUR">EUR</option></select>
+                        <select name="status" defaultValue={editingInvoice?.status || 'unpaid'} className="bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200"><option value="unpaid">Unpaid</option><option value="paid">Paid</option></select>
+                      </div>
+                      <input name="category" placeholder="Category (Food, Utilities, etc)" defaultValue={editingInvoice?.category || ''} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500" />
+                      <textarea name="notes" placeholder="Notes" defaultValue={editingInvoice?.notes || ''} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-violet-500 h-20 resize-none" />
+                    </div>
+                    <div className="flex gap-2 mt-4">
+                      <button type="button" onClick={() => { setShowAddInvoiceModal(false); setEditingInvoice(null) }} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg">Cancel</button>
+                      <button type="submit" className="flex-1 bg-violet-600 hover:bg-violet-700 text-white py-2 rounded-lg font-medium">{editingInvoice ? 'Save' : 'Add'}</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* Scan Invoice Modal */}
+            {showScanModal && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowScanModal(false)}>
+                <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-md border border-slate-700" onClick={e => e.stopPropagation()}>
+                  <h2 className="text-lg font-semibold text-white mb-4">📷 Scan Invoice</h2>
+                  <p className="text-sm text-slate-400 mb-4">Upload a photo or screenshot of your receipt/invoice</p>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault()
+                    const form = e.target as any
+                    const file = form.file.files[0]
+                    if (!file) return
+                    const formData = new FormData()
+                    formData.append('file', file)
+                    const res = await fetch('http://100.111.117.127:5174/api/invoices/scan', { method: 'POST', body: formData })
+                    const data = await res.json()
+                    setShowScanModal(false)
+                    alert(`Raw:\n${data.raw}`)
+                  }}>
+                    <input name="file" type="file" accept="image/*" className="w-full text-slate-400 mb-4" />
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setShowScanModal(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg">Cancel</button>
+                      <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg font-medium">Scan</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+        )
         return (
           <div className="card">
             <h2 className="text-lg font-semibold text-white mb-4">⚡ Capabilities</h2>
