@@ -527,21 +527,10 @@ export default function App() {
                     const data = await res.json()
                     setShowScanModal(false)
 
-                    if (data.local_path) {
-                      // Send to chat for vision processing
-                      const prompt = `Look at this image: ${data.local_path}
-Extract invoice data as JSON: {invoice_number, vendor, date (YYYY-MM-DD), subtotal, tax, total, currency, category, items:[{description, quantity, unit_price, total]}}. Return ONLY valid JSON.`
-                      
-                      const chatRes = await fetch('http://100.111.117.127:5174/api/chat', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ prompt })
-                      })
-                      const chatData = await chatRes.text()
-                      
+                    if (data.raw) {
                       let parsed = null
                       try {
-                        const match = chatData.match(/\{[\s\S]*\}/)
+                        const match = data.raw.match(/\{[\s\S]*\}/)
                         if (match) parsed = JSON.parse(match[0])
                       } catch {}
 
@@ -566,7 +555,7 @@ Extract invoice data as JSON: {invoice_number, vendor, date (YYYY-MM-DD), subtot
                         setInvoiceList(d.invoices || [])
                         alert(`✅ Invoice created for ${parsed.vendor}\nTotal: ${parsed.total?.toLocaleString()} ${parsed.currency}`)
                       } else {
-                        alert(`Could not parse invoice data.\nResponse: ${chatData}`)
+                        alert(`Could not parse invoice data.\nResponse: ${data.raw}`)
                       }
                     } else {
                       alert(`Error: ${data.error || 'Upload failed'}`)

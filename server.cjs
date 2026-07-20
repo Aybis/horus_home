@@ -422,11 +422,17 @@ if (multer) {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     try {
-      const hermesPath = '/Users/horus/.hermes/hermes-agent/venv/bin/hermes';
+      // Read image as base64
       const imageBuffer = fs.readFileSync(req.file.path);
       const base64Image = imageBuffer.toString('base64');
       const mimeType = req.file.mimetype || 'image/jpeg';
+      const dataUrl = `data:${mimeType};base64,${base64Image}`;
 
+      const docFilename = `invoice_${Date.now()}_${req.file.originalname}`;
+      const savedPath = path.join(UPLOAD_DIR, docFilename);
+      fs.renameSync(req.file.path, savedPath);
+
+      // Use OpenRouter with a cheap vision model
       const prompt = `Look at this invoice/receipt image and extract the following as JSON:
 {
   "invoice_number": "string or null",
@@ -442,15 +448,59 @@ if (multer) {
   ]
 }
 
-Extract all text visible. Return ONLY valid JSON.`;
+Extract all text visible. Return ONLY valid JSON. No explanation.`;
 
-      const docFilename = `invoice_${Date.now()}_${req.file.originalname}`;
-      const savedPath = path.join(UPLOAD_DIR, docFilename);
-      fs.renameSync(req.file.path, savedPath);
+      const apiBody = JSON.stringify({
+        model: process.env.SURPLUS_VISION_MODEL || 'claude-fable-5',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: dataUrl } }
+          ]
+        }],
+        max_tokens: 1024,
+        temperature: 0
+      });
 
-      // Return the saved file path - user can ask Horus to look at it
-      res.json({ success: true, message: 'File uploaded', document_path: `/uploads/${docFilename}`, local_path: savedPath });
+      const https = require('https');
+      const apiReq = https.request({
+        hostname: 'api.surplusintelligence.ai',
+        path: '/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.SURPLUS_API_KEY || 'inf_d00b4eeb4a204c30bb7419bac8c00cba'}`
+        }
+      }, (apiRes) => {
+        let responseData = '';
+        apiRes.on('data', chunk => responseData += chunk);
+        apiRes.on('end', () => {
+          try {
+            const parsed = JSON.parse(responseData);
+            if (parsed.error) {
+              console.error('[SCAN API ERROR]', JSON.stringify(parsed.error));
+              res.json({ success: false, error: parsed.error.message || 'API error', raw: responseData, document_path: `/uploads/${docFilename}` });
+            } else {
+              const output = parsed.choices?.[0]?.message?.content || '';
+              res.json({ success: true, raw: output, document_path: `/uploads/${docFilename}` });
+            }
+          } catch {
+            console.error('[SCAN PARSE ERROR]', responseData.substring(0, 500));
+            res.json({ success: false, raw: responseData, document_path: `/uploads/${docFilename}` });
+          }
+        });
+      });
+
+      apiReq.on('error', (err) => {
+        console.error('[SCAN ERROR]', err.message);
+        res.json({ success: false, error: err.message, raw: '', document_path: `/uploads/${docFilename}` });
+      });
+
+      apiReq.write(apiBody);
+      apiReq.end();
     } catch (err) {
+      console.error('[SCAN EXCEPTION]', err.message);
       res.status(500).json({ error: err.message });
     }
   });
