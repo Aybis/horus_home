@@ -527,40 +527,49 @@ export default function App() {
                     const data = await res.json()
                     setShowScanModal(false)
 
-                    // Try to parse JSON from response
-                    let parsed = null
-                    try {
-                      // Try to extract JSON from raw text
-                      const match = data.raw.match(/\{[\s\S]*\}/)
-                      if (match) parsed = JSON.parse(match[0])
-                    } catch {}
+                    if (data.local_path) {
+                      // Send to chat for vision processing
+                      const prompt = `Look at this image: ${data.local_path}
+Extract invoice data as JSON: {invoice_number, vendor, date (YYYY-MM-DD), subtotal, tax, total, currency, category, items:[{description, quantity, unit_price, total]}}. Return ONLY valid JSON.`
+                      
+                      const chatRes = await fetch('http://100.111.117.127:5174/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt })
+                      })
+                      const chatData = await chatRes.text()
+                      
+                      let parsed = null
+                      try {
+                        const match = chatData.match(/\{[\s\S]*\}/)
+                        if (match) parsed = JSON.parse(match[0])
+                      } catch {}
 
-                    if (parsed) {
-                      // Create invoice from parsed data
-                      const invoiceData = {
-                        invoice_number: parsed.invoice_number || '',
-                        vendor: parsed.vendor || 'Unknown',
-                        date: parsed.date || new Date().toISOString().slice(0, 10),
-                        subtotal: parsed.subtotal || 0,
-                        tax: parsed.tax || 0,
-                        total: parsed.total || 0,
-                        currency: parsed.currency || 'IDR',
-                        category: parsed.category || 'Other',
-                        notes: `Scanned from ${file.name}`,
-                        status: 'unpaid'
+                      if (parsed) {
+                        const invoiceData = {
+                          invoice_number: parsed.invoice_number || '',
+                          vendor: parsed.vendor || 'Unknown',
+                          date: parsed.date || new Date().toISOString().slice(0, 10),
+                          subtotal: parsed.subtotal || 0,
+                          tax: parsed.tax || 0,
+                          total: parsed.total || 0,
+                          currency: parsed.currency || 'IDR',
+                          category: parsed.category || 'Other',
+                          notes: `Scanned from ${file.name}`,
+                          status: 'unpaid'
+                        }
+                        await fetch('http://100.111.117.127:5174/api/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(invoiceData) })
+                        const params = new URLSearchParams()
+                        if (invoiceFilter !== 'all') params.set('status', invoiceFilter)
+                        const refresh = await fetch(`http://100.111.117.127:5174/api/invoices?${params.toString()}`)
+                        const d = await refresh.json()
+                        setInvoiceList(d.invoices || [])
+                        alert(`✅ Invoice created for ${parsed.vendor}\nTotal: ${parsed.total?.toLocaleString()} ${parsed.currency}`)
+                      } else {
+                        alert(`Could not parse invoice data.\nResponse: ${chatData}`)
                       }
-                      await fetch('http://100.111.117.127:5174/api/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(invoiceData) })
-
-                      // Refresh list
-                      const params = new URLSearchParams()
-                      if (invoiceFilter !== 'all') params.set('status', invoiceFilter)
-                      const refresh = await fetch(`http://100.111.117.127:5174/api/invoices?${params.toString()}`)
-                      const d = await refresh.json()
-                      setInvoiceList(d.invoices || [])
-
-                      alert(`✅ Invoice created for ${parsed.vendor}\nTotal: ${parsed.total?.toLocaleString()} ${parsed.currency}`)
                     } else {
-                      alert(`OCR Result (could not parse):\n${data.raw}`)
+                      alert(`Error: ${data.error || 'Upload failed'}`)
                     }
                   }}>
                     <input name="file" type="file" accept="image/*,application/pdf" className="w-full text-slate-400 mb-4" />
