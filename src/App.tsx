@@ -519,12 +519,51 @@ export default function App() {
                     if (!file) return
                     const formData = new FormData()
                     formData.append('file', file)
+
+                    form.querySelector('button[type="submit"]').textContent = '⏳ Scanning...'
+                    form.querySelector('button[type="submit"]').disabled = true
+
                     const res = await fetch('http://100.111.117.127:5174/api/invoices/scan', { method: 'POST', body: formData })
                     const data = await res.json()
                     setShowScanModal(false)
-                    alert(`Raw:\n${data.raw}`)
+
+                    // Try to parse JSON from response
+                    let parsed = null
+                    try {
+                      // Try to extract JSON from raw text
+                      const match = data.raw.match(/\{[\s\S]*\}/)
+                      if (match) parsed = JSON.parse(match[0])
+                    } catch {}
+
+                    if (parsed) {
+                      // Create invoice from parsed data
+                      const invoiceData = {
+                        invoice_number: parsed.invoice_number || '',
+                        vendor: parsed.vendor || 'Unknown',
+                        date: parsed.date || new Date().toISOString().slice(0, 10),
+                        subtotal: parsed.subtotal || 0,
+                        tax: parsed.tax || 0,
+                        total: parsed.total || 0,
+                        currency: parsed.currency || 'IDR',
+                        category: parsed.category || 'Other',
+                        notes: `Scanned from ${file.name}`,
+                        status: 'unpaid'
+                      }
+                      await fetch('http://100.111.117.127:5174/api/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(invoiceData) })
+
+                      // Refresh list
+                      const params = new URLSearchParams()
+                      if (invoiceFilter !== 'all') params.set('status', invoiceFilter)
+                      const refresh = await fetch(`http://100.111.117.127:5174/api/invoices?${params.toString()}`)
+                      const d = await refresh.json()
+                      setInvoiceList(d.invoices || [])
+
+                      alert(`✅ Invoice created for ${parsed.vendor}\nTotal: ${parsed.total?.toLocaleString()} ${parsed.currency}`)
+                    } else {
+                      alert(`OCR Result (could not parse):\n${data.raw}`)
+                    }
                   }}>
-                    <input name="file" type="file" accept="image/*" className="w-full text-slate-400 mb-4" />
+                    <input name="file" type="file" accept="image/*,application/pdf" className="w-full text-slate-400 mb-4" />
                     <div className="flex gap-2">
                       <button type="button" onClick={() => setShowScanModal(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg">Cancel</button>
                       <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg font-medium">Scan</button>

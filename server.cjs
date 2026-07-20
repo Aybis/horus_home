@@ -408,22 +408,26 @@ app.get('/api/invoices/:id/items', (req, res) => {
 
 // ── INVOICE OCR (AI VISION) ───────────────────────────────────────────────
 
-const multer = require('multer');
-const upload = multer({ dest: UPLOAD_DIR + '/' });
+let multer;
+try {
+  multer = require('multer');
+} catch (e) {
+  console.error('multer not installed - invoice scan disabled');
+}
 
-app.post('/api/invoices/scan', upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+if (multer) {
+  const upload = multer({ dest: UPLOAD_DIR + '/' });
 
-  try {
-    const hermesPath = '/Users/horus/.hermes/hermes-agent/venv/bin/hermes';
-    // Read image and convert to base64 for vision
-    const imageBuffer = fs.readFileSync(req.file.path);
-    const base64Image = imageBuffer.toString('base64');
-    const mimeType = req.file.mimetype || 'image/jpeg';
-    const dataUrl = `data:${mimeType};base64,${base64Image}`;
+  app.post('/api/invoices/scan', upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    // Use hermes chat with image to extract invoice data
-    const prompt = `Look at this invoice image and extract the following information as JSON:
+    try {
+      const hermesPath = '/Users/horus/.hermes/hermes-agent/venv/bin/hermes';
+      const imageBuffer = fs.readFileSync(req.file.path);
+      const base64Image = imageBuffer.toString('base64');
+      const mimeType = req.file.mimetype || 'image/jpeg';
+
+      const prompt = `Look at this invoice/receipt image and extract the following as JSON:
 {
   "invoice_number": "string or null",
   "vendor": "store/company name",
@@ -438,24 +442,19 @@ app.post('/api/invoices/scan', upload.single('file'), (req, res) => {
   ]
 }
 
-Extract all text visible in the invoice. If you cannot read it clearly, return what you can. Return ONLY valid JSON, no explanation.`;
+Extract all text visible. Return ONLY valid JSON.`;
 
-    // Save the image for reference later
-    const docFilename = `invoice_${Date.now()}_${req.file.originalname}`;
-    fs.renameSync(req.file.path, path.join(UPLOAD_DIR, docFilename));
+      const docFilename = `invoice_${Date.now()}_${req.file.originalname}`;
+      const savedPath = path.join(UPLOAD_DIR, docFilename);
+      fs.renameSync(req.file.path, savedPath);
 
-    // Use echo to pipe prompt to hermes chat (with image via stdin is tricky)
-    // Instead use hermes chat -q with the prompt
-    const cmd = `"${hermesPath}" -z ${JSON.stringify(prompt)} 2>&1`;
-
-    exec(cmd, { cwd: '/Users/horus', timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
-      const output = (stdout || '').trim() || (stderr || '').trim() || 'Could not read invoice';
-      res.json({ success: true, raw: output, document_path: `/uploads/${docFilename}` });
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      // Return the saved file path - user can ask Horus to look at it
+      res.json({ success: true, message: 'File uploaded', document_path: `/uploads/${docFilename}`, local_path: savedPath });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+}
 
 // Chat endpoint
 app.post('/api/chat', (req, res) => {
